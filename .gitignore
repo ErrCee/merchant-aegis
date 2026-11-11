@@ -1,0 +1,9 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+.envrc
+zerohold.db
+zerohold.db-wal
+zerohold.db-shm
