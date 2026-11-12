@@ -137,7 +137,7 @@ Instead of storing a mocked `prior_orders = 3` integer, ZeroHold maintains a rel
 ### 3.2 Engine B: Welford Velocity Math, 3PL Staging & Anti-Gaming Security
 
 #### Mathematical Formulation
-Engine B evaluates the merchant's 24-hour GMV against their 30-day rolling baseline ($\mu_{\text{GMV}} = \$4,000\text{/day}, \sigma_{\text{GMV}} = \$620$):
+Engine B evaluates the merchant's 24-hour GMV against their 30-day rolling baseline ($\mu_{\text{GMV}} = 4,000\text{ USD/day}$, $\sigma_{\text{GMV}} = 620\text{ USD}$):
 
 $$Z_{\text{GMV}} = \max\left(0, \frac{\text{GMV}_{24\text{h}} - \mu_{\text{GMV}}}{\sigma_{\text{GMV}}}\right)$$
 
@@ -147,10 +147,12 @@ $$\text{ExposureScore} = \underbrace{\min(3.8 \cdot Z_{\text{GMV}}, 42.0) \cdot 
 
 where $\gamma_{\text{attested}} = 0.15$ only after the merchant completes the **Human-in-the-Loop Waybill & Supplier PO Attestation** and PayPal's Sandbox server confirms `HTTP 200 OK` across all synced orders ($\gamma_{\text{attested}} = 1.0$ otherwise).
 
-* **During a $4.6\times$ Flash-Sale Surge ($\$18,450$ GMV, $Z = +23.31\sigma$, 5 of 7 orders unbacked):**
-  $$\text{ExposureScore} = 42.0 + 52.0 \cdot \left(\frac{5}{7}\right) + 8.0 = \mathbf{87.1 / 100} \quad (\text{ACTION REQUIRED // \$17k UNBACKED CAPTURE EXPOSURE})$$
+* **During a $4.6\times$ Flash-Sale Surge (`$18,450` GMV, $Z = +23.31\sigma$, 5 of 7 orders unbacked):**
+
+$$\text{ExposureScore} = 42.0 + 52.0 \cdot \left(\frac{5}{7}\right) + 8.0 = \mathbf{87.1 / 100} \quad (\text{ACTION REQUIRED // 17k USD UNBACKED EXPOSURE})$$
 * **After 3PL Manifest Pull, Inline AG Grid Review & PayPal Sync (0 untracked orders, 100% Seller Protection active):**
-  $$\text{ExposureScore} = (42.0 \times 0.15) + 0.0 + 8.0 = \mathbf{14.3 / 100} \quad (\text{COMPLIANT // 100\% FULFILLMENT \& PO BACKED})$$
+
+$$\text{ExposureScore} = (42.0 \times 0.15) + 0.0 + 8.0 = \mathbf{14.3 / 100} \quad (\text{COMPLIANT // 100\% FULFILLMENT AND PO BACKED})$$
 
 #### Adversarial Security: Why Bust-Out Scammers Cannot Game ZeroHold ("Threshold Surfing" Defense)
 A critical risk-engineering question is whether exposing an account exposure gauge helps bust-out scammers stay just below PayPal's freeze threshold. ZeroHold prevents threshold surfing through three mechanisms:
