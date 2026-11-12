@@ -43,6 +43,8 @@ try:
     from paypalserversdk.models.amount_with_breakdown import AmountWithBreakdown
     from paypalserversdk.models.checkout_payment_intent import CheckoutPaymentIntent
     from paypalserversdk.models.order_request import OrderRequest
+    from paypalserversdk.models.patch import Patch
+    from paypalserversdk.models.patch_op import PatchOp
     from paypalserversdk.models.purchase_unit_request import PurchaseUnitRequest
     from paypalserversdk.paypal_serversdk_client import PaypalServersdkClient
 
@@ -199,17 +201,28 @@ class PayPalSellerShieldClient:
         return {"order_id": real_order_id, "http_status": resp.status_code, "debug_id": debug_id, "latency_ms": ms}
 
     def fetch_live_order_from_paypal(self, order_id: str) -> dict[str, Any]:
-        """Calls APIMatic OrdersController.get_order / orders_get to inspect the live order on PayPal's server."""
+        """Executes APIMatic OrdersController.get_order (orders_get) + captures raw JSON & Paypal-Debug-Id."""
         t0 = time.perf_counter()
+        sdk_status = None
+        if self.sdk is not None:
+            try:
+                orders_ctrl = self.sdk.orders
+                get_fn = getattr(orders_ctrl, "get_order", None) or getattr(orders_ctrl, "orders_get", None)
+                sdk_res = get_fn({"id": order_id})
+                sdk_status = getattr(sdk_res, "status_code", 200)
+                print(f"🌐 [APIMATIC SDK -> PAYPAL SANDBOX] OrdersController.get_order({order_id}) -> HTTP {sdk_status}")
+            except Exception as e:
+                print(f"[APIMATIC GET_ORDER NOTE] {e}")
+
         token, _, _, _ = self.get_bearer_token()
         url = f"{self.base_url}/v2/checkout/orders/{order_id}"
         resp = httpx.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=15.0)
         ms = round((time.perf_counter() - t0) * 1000.0, 1)
         debug_id = resp.headers.get("paypal-debug-id", "N/A")
         body = resp.json() if resp.content else {}
-        print(f"🌐 [PAYPAL SANDBOX] GET {url} -> HTTP {resp.status_code} ({ms}ms) | Debug-Id: {debug_id}")
         return {
-            "http_status": resp.status_code,
+            "sdk_controller": "APIMatic OrdersController.get_order (paypal-server-sdk v2.4.0)",
+            "http_status": sdk_status or resp.status_code,
             "paypal_debug_id": debug_id,
             "latency_ms": ms,
             "paypal_server_response": body,
@@ -242,6 +255,30 @@ class PayPalSellerShieldClient:
         ]
 
         t0 = time.perf_counter()
+        if self.sdk is not None:
+            try:
+                orders_ctrl = self.sdk.orders
+                patch_fn = getattr(orders_ctrl, "patch_order", None) or getattr(orders_ctrl, "orders_patch", None)
+                sdk_patches = [
+                    Patch(
+                        op=PatchOp.REPLACE,
+                        path=f"/purchase_units/@reference_id=='{sku}'/custom_id",
+                        value=f"PROTECTED|{carrier}:{tracking_number}|{supplier_po}",
+                    ),
+                    Patch(
+                        op=PatchOp.REPLACE,
+                        path=f"/purchase_units/@reference_id=='{sku}'/description",
+                        value=f"{item_name} | {carrier} #{tracking_number} | {supplier_po}"[:120],
+                    ),
+                ]
+                sdk_p_res = patch_fn({"id": order_id, "body": sdk_patches})
+                print(
+                    f"🌐 [APIMATIC SDK -> PAYPAL SANDBOX] OrdersController.patch_order({order_id}) "
+                    f"-> HTTP {getattr(sdk_p_res, 'status_code', 204)}"
+                )
+            except Exception as e:
+                print(f"[APIMATIC PATCH_ORDER NOTE] {e}")
+
         patch_resp = httpx.patch(
             patch_url,
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},

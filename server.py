@@ -225,18 +225,23 @@ async def cockpit_ui() -> HTMLResponse:
       </div>
     </div>
 
-    <!-- Primary Merchant Operations Bar + Webhook Test Harness -->
+    <!-- Primary Merchant Operations Bar (Driven Directly by AG Grid Inline Editing) -->
     <div class="border border-slate-800 bg-slate-900/70 p-3.5 rounded-lg flex flex-wrap items-center justify-between gap-3">
-      <div class="flex flex-wrap items-center gap-2.5">
-        <span class="text-[11px] font-bold uppercase text-slate-400 mr-1">Merchant Actions:</span>
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-[11px] font-bold uppercase text-slate-400 mr-1">3PL &amp; AG Grid Actions:</span>
+        <button onclick="pullWarehouseManifestIntoGrid()"
+          class="text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-slate-950 px-3 py-2 rounded shadow"
+          title="Simulates pulling printed FedEx/DHL/UPS labels and wholesale POs from ShipStation/Delhivery WMS into AG Grid cells">
+          1. Pull 3PL Warehouse Manifest into AG Grid
+        </button>
         <button id="reconcileModalBtn" onclick="openReconciliationModal()"
-          class="text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-4 py-2 rounded shadow flex items-center gap-1.5">
-          <span>Reconcile Fulfillment &amp; Attest Supplier Invoices</span>
+          class="text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-3.5 py-2 rounded shadow flex items-center gap-1.5">
+          <span>2. Attest &amp; Sync AG Grid Waybills to PayPal</span>
           <span id="untrackedBadge" class="bg-slate-950 text-emerald-300 px-1.5 py-0.5 rounded text-[10px]">0 Pending</span>
         </button>
         <button onclick="runAction('/api/simulate/live-sandbox-order')"
-          class="text-xs font-bold bg-slate-800 hover:bg-slate-700 border border-cyan-700 text-cyan-300 px-3 py-2 rounded">
-          + Ingest Single Sandbox Order (APIMatic SDK)
+          class="text-xs font-bold bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 px-3 py-2 rounded">
+          + Ingest 1 Sandbox Order
         </button>
       </div>
 
@@ -263,7 +268,7 @@ async def cockpit_ui() -> HTMLResponse:
       <div class="flex flex-wrap justify-between items-center gap-2">
         <div class="flex items-center gap-3">
           <h2 class="text-xs font-bold uppercase tracking-wider text-slate-300">
-            AG Grid Live Order Evidence &amp; CE 3.0 Fingerprint Vault
+            AG Grid Interactive Evidence Vault <span class="text-cyan-400 font-normal normal-case">(Click any Carrier, Waybill, or Supplier PO cell to edit inline &bull; Use Floating Filters below headers)</span>
           </h2>
           <span id="statusSpinner" class="text-xs text-amber-400 font-bold hidden animate-pulse">
             Executing Live HTTPS Calls to api-m.sandbox.paypal.com...
@@ -277,7 +282,7 @@ async def cockpit_ui() -> HTMLResponse:
           </button>
         </div>
       </div>
-      <div id="vaultGrid" class="ag-theme-quartz-dark w-full h-[350px] rounded-lg border border-slate-800"></div>
+      <div id="vaultGrid" class="ag-theme-quartz-dark w-full h-[390px] rounded-lg border border-slate-800"></div>
     </div>
 
     <!-- Bottom Dual Inspector -->
@@ -386,31 +391,65 @@ async def cockpit_ui() -> HTMLResponse:
     let selectedOrderId = null;
 
     const columnDefs = [
-      { field: "order_id", headerName: "PayPal Order ID", width: 165, pinned: "left",
+      { field: "order_id", headerName: "PayPal Order ID", width: 170, pinned: "left",
+        filter: "agTextColumnFilter", floatingFilter: true,
+        checkboxSelection: p => !p.node.rowPinned,
+        headerCheckboxSelection: true,
         cellClass: "font-bold text-cyan-300" },
-      { field: "amount_usd", headerName: "Amount", width: 100, enableCellChangeFlash: true,
+      { field: "amount_usd", headerName: "Amount", width: 110, enableCellChangeFlash: true,
+        filter: "agNumberColumnFilter", floatingFilter: true,
         valueFormatter: p => p.value !== undefined ? `$${Number(p.value).toFixed(2)}` : "",
         cellClass: "font-bold text-slate-100" },
-      { field: "item_name", headerName: "Product & SKU", flex: 1, minWidth: 180,
+      { field: "item_name", headerName: "Product & SKU", flex: 1, minWidth: 185,
+        filter: "agTextColumnFilter", floatingFilter: true,
         cellRenderer: p => p.node.rowPinned ? `<strong class="text-amber-300">${p.value}</strong>` : `<span>${p.value} <code class="text-[10px] text-slate-400">[${p.data.sku}]</code></span>` },
-      { field: "prior_undisputed_orders", headerName: "Visa CE 3.0 SQL Match", width: 185, enableCellChangeFlash: true,
+      { field: "supplier_invoice_id", headerName: "Wholesale PO (Editable)", width: 165,
+        editable: p => !p.node.rowPinned,
+        cellEditor: "agTextCellEditor",
+        enableCellChangeFlash: true,
+        filter: "agTextColumnFilter", floatingFilter: true,
+        cellRenderer: p => {
+          if (p.node.rowPinned) return "";
+          return `<span class="text-amber-300 border-b border-dashed border-amber-700/70 pb-0.5" title="Click to edit Wholesale Supplier Invoice ID inline">${p.value || 'Click to enter PO'} &crarr;</span>`;
+        }
+      },
+      { field: "carrier", headerName: "Carrier (Editable)", width: 130,
+        editable: p => !p.node.rowPinned,
+        cellEditor: "agSelectCellEditor",
+        cellEditorParams: { values: ["FEDEX", "DHL", "UPS", "BLUEDART"] },
+        enableCellChangeFlash: true,
+        cellRenderer: p => {
+          if (p.node.rowPinned) return "";
+          return p.value
+            ? `<span class="text-cyan-300 font-bold border-b border-dashed border-cyan-700/70">${p.value} &darr;</span>`
+            : `<span class="text-slate-400 border-b border-dashed border-slate-600">${p.data.suggested_carrier || 'FEDEX'} &darr;</span>`;
+        }
+      },
+      { field: "tracking_number", headerName: "Waybill (Inline Editable)", width: 185,
+        editable: p => !p.node.rowPinned,
+        cellEditor: "agTextCellEditor",
+        enableCellChangeFlash: true,
+        filter: "agTextColumnFilter", floatingFilter: true,
+        cellRenderer: p => {
+          if (p.node.rowPinned) return `<strong class="text-cyan-300">${p.value || ''}</strong>`;
+          if (p.value && p.data._staged_only) {
+            return `<span class="text-amber-300 font-bold border-b border-dashed border-amber-500" title="Staged from 3PL WMS — Click '2. Attest & Sync' to push to PayPal">${p.value} (STAGED) &crarr;</span>`;
+          }
+          return p.value
+            ? `<span class="text-emerald-300 font-bold border-b border-dashed border-emerald-700/60" title="Click to edit waybill inline">${p.value} &crarr;</span>`
+            : `<span class="text-amber-400 font-semibold animate-pulse border-b border-dashed border-amber-600" title="Click to type waybill or click '1. Pull 3PL Warehouse Manifest'">+ Click or Pull WMS</span>`;
+        }
+      },
+      { field: "prior_undisputed_orders", headerName: "Visa CE 3.0 SQL", width: 165, enableCellChangeFlash: true,
         cellRenderer: p => {
           if (p.node.rowPinned) return "";
           const cnt = p.value || 0;
           return cnt >= 2
             ? `<span class="text-emerald-300 font-bold text-[11px]">&check; ${cnt} Settled (CE 3.0 OK)</span>`
-            : `<span class="text-amber-400 font-bold text-[11px]">&cross; ${cnt} Settled (Below Min 2)</span>`;
+            : `<span class="text-amber-400 font-bold text-[11px]">&cross; ${cnt} Settled (Min 2)</span>`;
         }
       },
-      { field: "tracking_number", headerName: "Carrier & Waybill", width: 175, enableCellChangeFlash: true,
-        cellRenderer: p => {
-          if (p.node.rowPinned) return `<strong class="text-cyan-300">${p.value || ''}</strong>`;
-          return p.value
-            ? `<span class="text-emerald-300 font-bold">${p.data.carrier}: ${p.value}</span>`
-            : `<span class="text-amber-400 font-bold animate-pulse">AWAITING ATTESTATION</span>`;
-        }
-      },
-      { field: "seller_protection", headerName: "Seller Protection", width: 155, enableCellChangeFlash: true,
+      { field: "seller_protection", headerName: "Seller Protection", width: 150, enableCellChangeFlash: true,
         cellRenderer: p => {
           if (p.node.rowPinned) return "";
           return p.value === "ELIGIBLE_ACTIVE"
@@ -418,7 +457,7 @@ async def cockpit_ui() -> HTMLResponse:
             : `<span class="text-amber-400 text-[11px] font-semibold tracking-tight">&bull; Unbacked Exposure</span>`;
         }
       },
-      { field: "dispute_status", headerName: "Dispute Auto-Defense", width: 225, enableCellChangeFlash: true,
+      { field: "dispute_status", headerName: "Dispute Auto-Defense", width: 220, enableCellChangeFlash: true,
         cellRenderer: p => {
           if (p.node.rowPinned) return "";
           const resetBtn = `<button onclick="event.stopPropagation(); resetSingleDispute('${p.data.order_id}')" title="Clear dispute to test another webhook" class="ml-1.5 text-slate-400 hover:text-slate-100 bg-slate-800 px-1 rounded text-[10px]">&orarr;</button>`;
@@ -437,7 +476,7 @@ async def cockpit_ui() -> HTMLResponse:
           </div>`;
         }
       },
-      { headerName: "Live PayPal Check", width: 140, pinned: "right",
+      { headerName: "Live PayPal Check", width: 135, pinned: "right",
         cellRenderer: p => {
           if (p.node.rowPinned) return "";
           return `<button onclick="verifyOrderOnPayPal('${p.data.order_id}')" class="bg-slate-800 hover:bg-cyan-900 border border-cyan-700 text-cyan-300 px-2 py-0.5 rounded text-[10px] font-bold">Verify on PayPal</button>`;
@@ -452,27 +491,52 @@ async def cockpit_ui() -> HTMLResponse:
           wrapText: true,
           autoHeight: true,
           resizable: true,
+          sortable: true,
           tooltipValueGetter: p => {
             if (!p.data) return "";
-            return `Order: ${p.data.order_id} | Buyer: ${p.data.buyer_email} | Product: ${p.data.item_name} [${p.data.sku}] | Waybill: ${p.data.carrier || 'NONE'} #${p.data.tracking_number || 'UNTRACKED'} | PO: ${p.data.supplier_invoice_id}`;
+            return `Order: ${p.data.order_id} | Buyer: ${p.data.buyer_email} | Product: ${p.data.item_name} [${p.data.sku}] | Waybill: ${p.data.carrier || 'NONE'} #${p.data.tracking_number || 'UNTRACKED'} | PO: ${p.data.supplier_invoice_id} (Click Carrier, Waybill, or PO cells to edit inline)`;
           }
         },
+        singleClickEdit: true,
+        stopEditingWhenCellsLoseFocus: true,
         tooltipShowDelay: 150,
         columnDefs,
         rowData: [],
         pinnedBottomRowData: [],
-        rowSelection: "single",
+        rowSelection: "multiple",
+        suppressRowClickSelection: true,
         animateRows: true,
         getRowId: params => params.data.order_id,
-        onRowClicked: e => { if (!e.node.rowPinned) { selectedOrderId = e.data.order_id; renderOrderInspector(e.data); } }
+        onRowClicked: e => { if (!e.node.rowPinned) { selectedOrderId = e.data.order_id; renderOrderInspector(e.data); } },
+        onCellValueChanged: e => {
+          e.data._staged_only = true;
+          gridApi.refreshCells({ rowNodes: [e.node], force: true });
+          renderOrderInspector(e.data);
+        }
       });
     }
 
+    function pullWarehouseManifestIntoGrid() {
+      if (!gridApi) return;
+      let stagedCount = 0;
+      gridApi.forEachNode(node => {
+        if (!node.rowPinned && (!node.data.tracking_number || node.data._staged_only)) {
+          node.setDataValue("carrier", node.data.carrier || node.data.suggested_carrier || "FEDEX");
+          node.setDataValue("tracking_number", node.data.suggested_tracking);
+          node.data._staged_only = true;
+          node.setSelected(true);
+          stagedCount++;
+        }
+      });
+      gridApi.refreshCells({ force: true });
+    }
+
     function openReconciliationModal() {
-      if (!latestState) return;
-      const orders = latestState.orders || [];
-      const untracked = orders.filter(o => !o.tracking_number);
-      const targetList = untracked.length > 0 ? untracked : orders;
+      if (!gridApi) return;
+      const allGridOrders = [];
+      gridApi.forEachNode(n => { if (!n.rowPinned) allGridOrders.push(n.data); });
+      const pending = allGridOrders.filter(o => !o.tracking_number || o._staged_only || o.seller_protection !== "ELIGIBLE_ACTIVE");
+      const targetList = pending.length > 0 ? pending : allGridOrders;
 
       const tbody = document.getElementById("reconcileTableBody");
       tbody.innerHTML = targetList.map((o, idx) => `
